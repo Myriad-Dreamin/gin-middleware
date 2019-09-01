@@ -6,7 +6,9 @@ import (
 
 	"github.com/Myriad-Dreamin/core-oj/log"
 	jwt "github.com/Myriad-Dreamin/gin-middleware/auth/jwt"
+	privileger "github.com/Myriad-Dreamin/gin-middleware/auth/privileger"
 	morm "github.com/Myriad-Dreamin/gin-middleware/sample/user/orm"
+	rbac "github.com/Myriad-Dreamin/gin-middleware/sample/user/rbac"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
@@ -37,6 +39,12 @@ func (srv *Server) prepareDatabase(driver, connection string) error {
 		return err
 	}
 
+	err = rbac.Init(srv.engine)
+	if err != nil {
+		srv.logger.Error("prepare failed", "error", err)
+		return err
+	}
+
 	morm.RegisterEngine(srv.engine)
 
 	srv.engine.ShowSQL(true)
@@ -53,6 +61,8 @@ func (srv *Server) Serve(port string) error {
 	if err != nil {
 		return err
 	}
+
+	x := rbac.GetEnforcer()
 
 	r := gin.Default()
 	r.GET("/ping", func(c *gin.Context) {
@@ -73,25 +83,36 @@ func (srv *Server) Serve(port string) error {
 		// userRouter.DELETE("/:id", userService.Delete)
 	}
 
-	testRouter := r.Group("/api")
+	authmw := privileger.NewMiddleWare(&x, "user:")
+	r.Use(authmw.Build())
+	// _ = authmw
+	apiRouter := r.Group("/api")
 	{
-		testRouter.GET("/auth", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-			})
-		})
-		testRouter.Use(jwt.NewMiddleWare().Authorize())
-		testRouter.GET("/authv2", func(c *gin.Context) {
+		apiRouter.Use(jwt.NewMiddleWare().Build())
+		apiRouter.GET("/authv2", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
 			})
 		})
-		testRouter.Group("/")
-		testRouter.GET("/authv3", func(c *gin.Context) {
+
+		// apiRouter
+
+		apiRouter.Group("/")
+		apiRouter.GET("/authv3", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzz",
 			})
 		})
+
+		authRouter := apiRouter.Group("/auth")
+		{
+			var authService = NewAuthService(srv.logger)
+			authRouter.GET("/policy", authService.GetPolicy)
+			authRouter.PUT("/policy", authService.AddPolicy)
+			authRouter.GET("/group/policy", authService.GetGroupingPolicy)
+			authRouter.PUT("/group/policy", authService.AddGroupingPolicy)
+
+		}
 	}
 
 	return r.Run(port)

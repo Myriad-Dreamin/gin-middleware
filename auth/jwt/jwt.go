@@ -106,7 +106,7 @@ func NewMiddleWare() *Middleware {
 }
 
 // Authorize 中间件，检查token
-func (middleware *Middleware) Authorize() gin.HandlerFunc {
+func (middleware *Middleware) Build() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, err := middleware.CheckIfTokenExpire(c)
 		if err != nil {

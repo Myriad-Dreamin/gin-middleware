@@ -40,7 +40,7 @@ func (us *UserService) Register(c *gin.Context) {
 		return
 	}
 
-	aff, err := user.Insert()
+	aff, err := user.InsertWithDefault()
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
 		return

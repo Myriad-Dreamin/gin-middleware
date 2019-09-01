@@ -1,6 +1,8 @@
 package orm
 
 import (
+	"errors"
+
 	"github.com/go-xorm/xorm"
 )
 
@@ -37,6 +39,49 @@ func (obj *User) GetSlice() interface{} {
 // Insert into Engine
 func (obj *User) Insert() (int64, error) {
 	return x.Insert(obj)
+}
+
+// Insert Unique
+func (obj *User) InsertWithDefault() (int64, error) {
+	var mapobj = make(map[string]interface{})
+	if len(obj.Name) != 0 {
+		mapobj["name"] = obj.Name
+	} else {
+		return 0, errors.New("name missing")
+	}
+
+	if len(obj.Password) != 0 {
+		mapobj["password"] = obj.Password
+	}
+
+	if obj.Exp != 0 {
+		mapobj["exp"] = obj.Exp
+	}
+
+	if len(obj.Email) != 0 {
+		mapobj["email"] = obj.Email
+	}
+
+	if len(obj.Phone) != 0 {
+		mapobj["phone"] = obj.Phone
+	}
+
+	if len(obj.School) != 0 {
+		mapobj["school"] = obj.School
+	}
+
+	if obj.SolvedProblems != 0 {
+		mapobj["solved_problems"] = obj.SolvedProblems
+	}
+	affected, err := x.Table(obj.TableName()).Insert(mapobj)
+	if affected == 0 || err != nil {
+		return affected, err
+	}
+	has, err := x.Table(obj.TableName()).Cols("id").Get(obj)
+	if !has {
+		return 0, errors.New("insert missing")
+	}
+	return affected, err
 }
 
 // Delete from Engine

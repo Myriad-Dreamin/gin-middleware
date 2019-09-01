@@ -9,6 +9,10 @@ import (
 // must register
 var x *xorm.Engine
 
+func GetEngine() *xorm.Engine {
+	return x
+}
+
 // RegisterEngine to store objects
 func RegisterEngine(y *xorm.Engine) {
 	x = y
