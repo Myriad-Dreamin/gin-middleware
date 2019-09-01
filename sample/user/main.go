@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/Myriad-Dreamin/core-oj/log"
+	jwt "github.com/Myriad-Dreamin/gin-middleware/auth/jwt"
 	morm "github.com/Myriad-Dreamin/gin-middleware/sample/user/orm"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
@@ -71,6 +72,28 @@ func (srv *Server) Serve(port string) error {
 		// userRouter.PUT("/:id/updateform-runtimeid", userService.UpdateRuntimeID)
 		// userRouter.DELETE("/:id", userService.Delete)
 	}
+
+	testRouter := r.Group("/api")
+	{
+		testRouter.GET("/auth", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+			})
+		})
+		testRouter.Use(jwt.NewMiddleWare().Authorize())
+		testRouter.GET("/authv2", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+			})
+		})
+		testRouter.Group("/")
+		testRouter.GET("/authv3", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzz",
+			})
+		})
+	}
+
 	return r.Run(port)
 }
 
