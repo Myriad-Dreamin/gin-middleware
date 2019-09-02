@@ -25,10 +25,10 @@ func NewMiddleWare(v Validator, utable string) *MiddleWare {
 	}
 }
 
-func (mw *MiddleWare) Build() gin.HandlerFunc {
+func (middleware *MiddleWare) Build() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		fmt.Println("toggled")
-		if ok, err := mw.CheckPermission(c); err != nil {
+		if ok, err := middleware.CheckPermission(c); err != nil {
 			c.AbortWithStatus(http.StatusForbidden)
 			return
 		} else if !ok {
@@ -38,10 +38,10 @@ func (mw *MiddleWare) Build() gin.HandlerFunc {
 	}
 }
 
-func (mw *MiddleWare) CheckPermission(c *gin.Context) (bool, error) {
+func (middleware *MiddleWare) CheckPermission(c *gin.Context) (bool, error) {
 	var uid string
 	if uid = c.GetHeader("uid"); len(uid) == 0 {
 		return false, errors.New("missing uid")
 	}
-	return mw.v.Enforce(mw.utable+uid, c.Request.URL.Path, c.Request.Method)
+	return middleware.v.Enforce(middleware.utable+uid, c.Request.URL.Path, c.Request.Method)
 }
