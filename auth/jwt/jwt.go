@@ -11,38 +11,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	signKey = "Myriad-Dreamin"
-)
-
-// GetSignKey .
-func GetSignKey() string {
-	return signKey
-}
-
-// SetSignKey .
-func SetSignKey(key string) string {
-	signKey = key
-	return signKey
-}
-
-// GenerateToken with expexpire time
-func GenerateToken(id int, expireSecond int64) (string, error) {
-	return NewMiddleWare().CreateToken(CustomClaims{
-		id,
-		jwt.StandardClaims{
-			NotBefore: int64(time.Now().Unix() - 10),
-			ExpiresAt: int64(time.Now().Unix() + expireSecond),
-			Issuer:    signKey,
-		},
-	})
-}
-
 // Middleware customizes the jwt-middleware
 type Middleware struct {
 	SigningAlgorithm             string
 	JWTHeaderKey                 string
 	JWTHeaderPrefixWithSplitChar string
+	SigningKeyString             string
 	SigningKey                   []byte
 
 	// Public key file for asymmetric algorithms
@@ -54,43 +28,76 @@ type Middleware struct {
 	// Public key
 	pubKey *rsa.PublicKey
 
-	MaxRefresh time.Duration
-}
+	MaxRefresh   time.Duration
+	RefreshTime  time.Duration
+	ExpireSecond int64
 
-// CustomClaims records authorization information
-type CustomClaims struct {
-	ID int `json:"id"`
-	jwt.StandardClaims
+	customClaimsFactory CustomClaimsFactory
+	validFunction       CustomClaimsValidateFunction
 }
 
 // NewMiddleWare return default middleware setting
-func NewMiddleWare() *Middleware {
+func NewMiddleWare(
+	customClaimsFactory CustomClaimsFactory,
+	validFunction CustomClaimsValidateFunction,
+) *Middleware {
 	return &Middleware{
+		// todo: customize signing algorithm
 		SigningAlgorithm:             "HS256",
 		JWTHeaderKey:                 "Authorization",
 		JWTHeaderPrefixWithSplitChar: "Bearer ",
+		SigningKeyString: GetSignKey(),
 		SigningKey:                   []byte(GetSignKey()),
+		customClaimsFactory:          customClaimsFactory,
+		validFunction:                validFunction,
 		// MaxRefresh: default zero
 	}
+}
+
+// UnauthorizedMessage just return code with reason
+type UnauthorizedMessage struct {
+	Code int64  `json:"code"`
+	Msg  string `json:"msg"`
 }
 
 // Build return the middleware
 func (middleware *Middleware) Build() gin.HandlerFunc {
 	return func(c *gin.Context) {
+
 		claims, err := middleware.CheckIfTokenExpire(c)
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"code": -1,
-				"msg":  err.Error(),
+			c.AbortWithStatusJSON(http.StatusUnauthorized, UnauthorizedMessage{
+				Code: -1,
+				Msg:  err.Error(),
 			})
-			c.Abort()
 			return
 		}
+
+		// then make yourself the custom validation
+		// e.g. claims.CustomField.IP == req.IP
+		if err = middleware.validFunction(c, claims); err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, UnauthorizedMessage{
+				Code: -1,
+				Msg:  err.Error(),
+			})
+			return
+		}
+
+		// store the context for stateful session
 		c.Set("claims", claims)
-
-		// todo: authorize identity
-
 	}
+}
+
+// GenerateToken with expired time
+func (middleware *Middleware) GenerateToken(field interface{}) (string, error) {
+	return middleware.CreateToken(CustomClaims{
+		CustomField: field,
+		StandardClaims: jwt.StandardClaims{
+			NotBefore: time.Now().Unix() - 10,
+			ExpiresAt: time.Now().Unix() + middleware.ExpireSecond,
+			Issuer:    middleware.SigningKeyString,
+		},
+	})
 }
 
 // CreateToken generate a token
@@ -105,14 +112,13 @@ func (middleware *Middleware) RefreshToken(c *gin.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	claims.StandardClaims.ExpiresAt = jwt.TimeFunc().Add(1 * time.Hour).Unix()
+	claims.StandardClaims.ExpiresAt = jwt.TimeFunc().Add(middleware.RefreshTime).Unix()
 	return middleware.CreateToken(*claims)
 }
 
 // CheckIfTokenExpire check if token expire
 func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims, error) {
 	token, err := middleware.ParseToken(c)
-
 	if err != nil {
 		// If we receive an error, and the error is anything other than a single
 		// ValidationErrorExpired, we want to return the error.
@@ -125,6 +131,10 @@ func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims,
 		}
 	}
 
+	if token == nil {
+		return nil, errors.New("not found")
+	}
+
 	claims := token.Claims.(*CustomClaims)
 
 	if claims.ExpiresAt < jwt.TimeFunc().Add(-middleware.MaxRefresh).Unix() {
@@ -134,26 +144,28 @@ func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims,
 	return claims, nil
 }
 
-// ParseToken check and reture if token in the context
+// ParseToken check and return if token in the context
 func (middleware *Middleware) ParseToken(c *gin.Context) (*jwt.Token, error) {
 	token, err := middleware.jwtFromHeader(c)
 	if err != nil {
 		return nil, err
 	}
 
-	return jwt.ParseWithClaims(token, &CustomClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if jwt.GetSigningMethod(middleware.SigningAlgorithm) != t.Method {
-			return nil, ErrInvalidSigningAlgorithm
-		}
-		if middleware.usingPublicKeyAlgo() {
-			return middleware.pubKey, nil
-		}
+	return jwt.ParseWithClaims(token, middleware.customClaimsFactory(), middleware.KeyFunc)
+}
 
-		// save token string if vaild
-		c.Set("JWT_TOKEN", token)
+func (middleware *Middleware) KeyFunc(t *jwt.Token) (interface{}, error) {
+	if jwt.GetSigningMethod(middleware.SigningAlgorithm) != t.Method {
+		return nil, ErrInvalidSigningAlgorithm
+	}
+	if middleware.usingPublicKeyAlgorithm() {
+		return middleware.pubKey, nil
+	}
 
-		return middleware.SigningKey, nil
-	})
+	// save token string if valid
+	//c.Set("JWT_TOKEN", token)
+
+	return middleware.SigningKey, nil
 }
 
 func (middleware *Middleware) jwtFromHeader(c *gin.Context) (string, error) {
@@ -170,7 +182,7 @@ func (middleware *Middleware) jwtFromHeader(c *gin.Context) (string, error) {
 	return authHeader[len(middleware.JWTHeaderPrefixWithSplitChar):], nil
 }
 
-func (middleware *Middleware) usingPublicKeyAlgo() bool {
+func (middleware *Middleware) usingPublicKeyAlgorithm() bool {
 	switch middleware.SigningAlgorithm {
 	case "RS256", "RS512", "RS384":
 		return true

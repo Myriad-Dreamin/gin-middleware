@@ -15,13 +15,15 @@ type UserService struct {
 	UserX    *morm.UserX
 	logger   log.TendermintLogger
 	codePath string
+	middleware *jwt.Middleware
 }
 
 // NewUserService return a pointer of UserService
-func NewUserService(userX *morm.UserX, logger log.TendermintLogger) *UserService {
+func NewUserService(userX *morm.UserX, logger log.TendermintLogger, middleware *jwt.Middleware) *UserService {
 	return &UserService{
 		UserX:  userX,
 		logger: logger,
+		middleware: middleware,
 	}
 }
 
@@ -112,7 +114,7 @@ func (us *UserService) Login(c *gin.Context) {
 		return
 	}
 
-	if token, err := jwt.GenerateToken(user.ID, 3600); err != nil {
+	if token, err := us.middleware.GenerateToken(&CustomField{user.ID}); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"code":  CodeAuthGenerateTokenError,
 			"error": err.Error(),

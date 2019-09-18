@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/Myriad-Dreamin/core-oj/log"
 	jwt "github.com/Myriad-Dreamin/gin-middleware/auth/jwt"
@@ -55,6 +56,10 @@ func (srv *Server) Close() error {
 	return nil
 }
 
+type CustomField struct {
+	UID int
+}
+
 func (srv *Server) Serve(port string) error {
 
 	userx, err := morm.NewUserX()
@@ -63,6 +68,17 @@ func (srv *Server) Serve(port string) error {
 	}
 
 	x := rbac.GetEnforcer()
+	jwtmw := jwt.NewMiddleWare(func() *jwt.CustomClaims {
+		var cc = new(jwt.CustomClaims)
+		cc.CustomField = &CustomField{}
+		return cc
+	}, func(c *gin.Context, cc *jwt.CustomClaims) error {
+		fmt.Println(cc.CustomField.(*CustomField).UID)
+		c.Set("uid", strconv.Itoa(cc.CustomField.(*CustomField).UID))
+		return nil
+	})
+
+	jwtmw.ExpireSecond = 3600
 
 	r := gin.Default()
 	r.GET("/ping", func(c *gin.Context) {
@@ -73,7 +89,7 @@ func (srv *Server) Serve(port string) error {
 
 	userRouter := r.Group("/user")
 	{
-		var userService = NewUserService(userx, srv.logger)
+		var userService = NewUserService(userx, srv.logger, jwtmw)
 		// userRouter.GET("/:id", userService.Get)
 		// userRouter.GET("/:id/content", userService.GetContent)
 		// userRouter.GET("/:id/result", userService.GetResult)
@@ -83,12 +99,12 @@ func (srv *Server) Serve(port string) error {
 		// userRouter.DELETE("/:id", userService.Delete)
 	}
 
-	authmw := privileger.NewMiddleWare(&x, "user:")
-	r.Use(authmw.Build())
 	// _ = authmw
 	apiRouter := r.Group("/api")
+	apiRouter.Use(jwtmw.Build())
+	authmw := privileger.NewMiddleWare(&x, "user:", "uid")
+	apiRouter.Use(authmw.Build())
 	{
-		apiRouter.Use(jwt.NewMiddleWare().Build())
 		apiRouter.GET("/authv2", func(c *gin.Context) {
 			c.JSON(200, gin.H{
 				"msg": "orzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
