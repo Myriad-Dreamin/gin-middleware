@@ -114,6 +114,7 @@ func (middleware *Middleware) GenerateTokenWithRefreshToken(field interface{}) (
 		return "", "", nil
 	}
 	rs, err := middleware.CreateToken(CustomClaims{
+		CustomField: field,
 		StandardClaims: jwt.StandardClaims{
 			NotBefore: time.Now().Unix() - 10,
 			ExpiresAt: time.Now().Unix() + middleware.RefreshSecond,
