@@ -142,7 +142,7 @@ func (middleware *Middleware) RefreshToken(c *gin.Context) (string, error) {
 		return "", err
 	}
 	if claims.IsRefreshToken {
-		claims.RefreshTarget.ExpiresAt = jwt.TimeFunc().Unix() + middleware.RefreshSecond
+		claims.RefreshTarget.ExpiresAt = jwt.TimeFunc().Unix() + middleware.ExpireSecond
 		return middleware.CreateToken(*claims.RefreshTarget)
 	} else {
 		return "", ErrInvalidAuthHeader
