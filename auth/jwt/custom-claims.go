@@ -8,6 +8,8 @@ import (
 // CustomClaims records authorization information
 type CustomClaims struct {
 	jwt.StandardClaims
+	IsRefreshToken bool
+	RefreshTarget *CustomClaims
 	CustomField interface{}
 }
 

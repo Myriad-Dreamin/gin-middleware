@@ -2,7 +2,7 @@ package jwt
 
 import (
 	"crypto/rsa"
-	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -28,8 +28,8 @@ type Middleware struct {
 	// Public key
 	pubKey *rsa.PublicKey
 
-	MaxRefresh   time.Duration
-	RefreshTime  time.Duration
+	//MaxRefresh   time.Duration
+	RefreshSecond  int64
 	ExpireSecond int64
 
 	customClaimsFactory CustomClaimsFactory
@@ -100,6 +100,35 @@ func (middleware *Middleware) GenerateToken(field interface{}) (string, error) {
 	})
 }
 
+// GenerateToken with expired time
+func (middleware *Middleware) GenerateTokenWithRefreshToken(field interface{}) (string, string, error) {
+	c := CustomClaims{
+		CustomField: field,
+		StandardClaims: jwt.StandardClaims{
+			NotBefore: time.Now().Unix() - 10,
+			ExpiresAt: time.Now().Unix() + middleware.ExpireSecond,
+			Issuer:    middleware.SigningKeyString,
+		},
+	}
+	cs, err := middleware.CreateToken(c)
+	if err != nil {
+		return "", "", nil
+	}
+	rs, err := middleware.CreateToken(CustomClaims{
+		StandardClaims: jwt.StandardClaims{
+			NotBefore: time.Now().Unix() - 10,
+			ExpiresAt: time.Now().Unix() + middleware.RefreshSecond,
+			Issuer:    middleware.SigningKeyString,
+		},
+		IsRefreshToken: true,
+		RefreshTarget:  &c,
+	})
+	if err != nil {
+		return "", "", nil
+	}
+	return cs, rs, nil
+}
+
 // CreateToken generate a token
 func (middleware *Middleware) CreateToken(claims CustomClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -112,19 +141,38 @@ func (middleware *Middleware) RefreshToken(c *gin.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	claims.StandardClaims.ExpiresAt = jwt.TimeFunc().Add(middleware.RefreshTime).Unix()
-	return middleware.CreateToken(*claims)
+	if claims.IsRefreshToken {
+		claims.RefreshTarget.ExpiresAt = jwt.TimeFunc().Unix() + middleware.RefreshSecond
+		return middleware.CreateToken(*claims.RefreshTarget)
+	} else {
+		return "", ErrInvalidAuthHeader
+	}
+}
+
+// RefreshToken if ok
+func (middleware *Middleware) RefreshTokenFunc(c *gin.Context, operate func(*CustomClaims) error) func(c *gin.Context) (string, error) {
+	return func (c *gin.Context) (string ,error) {
+		claims, err := middleware.CheckIfTokenExpire(c)
+		if err != nil {
+			return "", err
+		}
+		if claims.IsRefreshToken {
+			claims.RefreshTarget.ExpiresAt = jwt.TimeFunc().Unix() + middleware.RefreshSecond
+			err = operate(claims)
+			if err != nil {
+				return "", err
+			}
+			return middleware.CreateToken(*claims.RefreshTarget)
+		} else {
+			return "", ErrInvalidAuthHeader
+		}
+	}
 }
 
 // CheckIfTokenExpire check if token expire
 func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims, error) {
 	token, err := middleware.ParseToken(c)
 	if err != nil {
-		// If we receive an error, and the error is anything other than a single
-		// ValidationErrorExpired, we want to return the error.
-		// If the error is just ValidationErrorExpired, we want to continue, as we can still
-		// refresh the token if it's within the MaxRefresh time.
-		// (see https://github.com/appleboy/gin-jwt/issues/176)
 		validationErr, ok := err.(*jwt.ValidationError)
 		if !ok || validationErr.Errors != jwt.ValidationErrorExpired {
 			return nil, err
@@ -132,16 +180,21 @@ func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims,
 	}
 
 	if token == nil {
-		return nil, errors.New("not found")
+		return nil, ErrEmptyAuthHeader
 	}
 
 	claims := token.Claims.(*CustomClaims)
+	fmt.Println(claims.ExpiresAt, jwt.TimeFunc().Unix())
 
-	if claims.ExpiresAt < jwt.TimeFunc().Add(-middleware.MaxRefresh).Unix() {
+	if claims.ExpiresAt < jwt.TimeFunc().Unix() {
 		return nil, ErrExpiredToken
 	}
 
 	return claims, nil
+}
+
+func (middleware *Middleware) ParseWithClaims(token string) (*jwt.Token, error) {
+	return jwt.ParseWithClaims(token, middleware.customClaimsFactory(), middleware.KeyFunc)
 }
 
 // ParseToken check and return if token in the context
@@ -151,7 +204,7 @@ func (middleware *Middleware) ParseToken(c *gin.Context) (*jwt.Token, error) {
 		return nil, err
 	}
 
-	return jwt.ParseWithClaims(token, middleware.customClaimsFactory(), middleware.KeyFunc)
+	return middleware.ParseWithClaims(token)
 }
 
 func (middleware *Middleware) KeyFunc(t *jwt.Token) (interface{}, error) {
@@ -170,13 +223,12 @@ func (middleware *Middleware) KeyFunc(t *jwt.Token) (interface{}, error) {
 
 func (middleware *Middleware) jwtFromHeader(c *gin.Context) (string, error) {
 	authHeader := c.Request.Header.Get(middleware.JWTHeaderKey)
-
 	if authHeader == "" {
-		return "", errors.New("empty header")
+		return "", ErrEmptyAuthHeader
 	}
 
 	if !strings.HasPrefix(authHeader, middleware.JWTHeaderPrefixWithSplitChar) {
-		return "", errors.New("invalid header")
+		return "", ErrInvalidAuthHeader
 	}
 
 	return authHeader[len(middleware.JWTHeaderPrefixWithSplitChar):], nil
