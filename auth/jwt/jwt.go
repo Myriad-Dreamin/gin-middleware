@@ -2,7 +2,6 @@ package jwt
 
 import (
 	"crypto/rsa"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -184,7 +183,6 @@ func (middleware *Middleware) CheckIfTokenExpire(c *gin.Context) (*CustomClaims,
 	}
 
 	claims := token.Claims.(*CustomClaims)
-	fmt.Println(claims.ExpiresAt, jwt.TimeFunc().Unix())
 
 	if claims.ExpiresAt < jwt.TimeFunc().Unix() {
 		return nil, ErrExpiredToken
